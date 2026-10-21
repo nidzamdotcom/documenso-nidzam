@@ -17,10 +17,15 @@ users of sign.nidzam.com can get the source of the version they interact with.
 - **Name:** user-facing "Documenso" text (UI, emails, page titles, signature disclosure, passkey
   name) becomes "NIDZAM.COM". Code identifiers, `X-Documenso-*` headers, package names and CSS
   class names are left alone. The "Check out Documenso" line after signing is removed.
+- **Contact:** Documenso's support address (`support@documenso.com`, used in the signature
+  disclosure and some emails) becomes `SUPPORT_EMAIL` in `patch-nidzam.mjs`.
+- **Source link:** a "Source code" link to this repository is added to the app menu's copyright
+  line and to the end of the signature disclosure page (AGPL section 13).
 - **Static files:** favicons, app icons, web manifest, link-preview image, and the logo used on
   the signing certificate and audit log (`assets/branding/`).
-- **Cache-safe names:** changed browser assets are renamed (`x.js` → `x.nz.js`), and references to
-  them are updated, because `/assets/*` is served as immutable.
+- **Cache-safe names:** changed browser assets are renamed (`x.js` → `x.nz-<fingerprint>.js`, where
+  the fingerprint covers the patch script and assets), and references to them are updated, because
+  `/assets/*` is served as immutable.
 
 The script counts every change and fails the build if a count differs from what it expects for
 v2.20.0, or if any plain "Documenso" is left. Every patched JS file is syntax-checked.

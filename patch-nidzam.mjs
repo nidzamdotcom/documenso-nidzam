@@ -4,12 +4,16 @@
 // (X-Documenso-*), env names and package names are left alone.
 // Every step checks how many places it changed and fails the build if that
 // differs from what was seen in v2.20.0, so an upgrade can't silently half-apply.
+import crypto from 'node:crypto';
 import fs from 'node:fs';
 import path from 'node:path';
 
 const BUILD = '/app/apps/remix/build';
 const ASSETS = '/nidzam';
 const NAME = 'NIDZAM.COM';
+// Contact shown to signers (signature disclosure, some emails). Documenso's default
+// and a few hard-coded links point at its own support desk.
+const SUPPORT_EMAIL = 'hello@nidzam.com';
 const report = [];
 
 const fail = (msg) => {
@@ -103,6 +107,54 @@ const patchSvg = (oldViewBox, spec, expected) => {
 patchSvg('0 0 2248 320', JSON.parse(fs.readFileSync(`${ASSETS}/ui/wordmark.json`, 'utf8')), 2);
 patchSvg('0 0 84 84', JSON.parse(fs.readFileSync(`${ASSETS}/ui/icon.json`, 'utf8')), 2);
 
+// ---- 1b. Source code links (AGPL section 13) -----------------------------------
+// The licence asks that users of a modified network service are offered its
+// source. Two places: the app menu's "© <year> …" line (signed-in users) and the
+// end of the signature disclosure page, which every signing dialog links to.
+
+const SOURCE_URL = 'https://github.com/nidzamdotcom/documenso-nidzam';
+const sourceLink = (pfx) =>
+  `${pfx}jsx("a",{href:${JSON.stringify(SOURCE_URL)},target:"_blank",rel:"noopener noreferrer",className:"underline",children:"Source code"})`;
+
+// menu: "© 2026 Documenso, Inc.<br/>All rights reserved." -> "© 2026 NIDZAM.COM · Source code<br/>…"
+{
+  let n = 0;
+  const re = /" Documenso, Inc\.",(\s*(?:\/\* @__PURE__ \*\/\s*)?)([\w$]+\.)?jsx\(\s*"br"/g;
+  for (const f of files) {
+    set(f, src.get(f).replace(re, (_, ws, pfx = '') => {
+      n++;
+      return `" ${NAME} · ",${sourceLink(pfx)},${ws}${pfx}jsx("br"`;
+    }));
+  }
+  if (n !== 2) fail(`menu source link: expected 2, patched ${n}`);
+  report.push(`source link in menu: ${n}`);
+}
+
+// disclosure page: new paragraph after the last section's paragraph (message YY+hPA)
+{
+  let n = 0;
+  for (const f of files) {
+    let s = src.get(f);
+    // the component's use is `id: "YY+hPA"`; translation catalogs have `"YY+hPA":` instead
+    const at = s.search(/id:\s*"YY\+hPA"/);
+    if (at < 0) continue;
+    const head = s.slice(Math.max(0, at - 400), at);
+    const call = [...head.matchAll(/([\w$]+\.)?jsx\(\s*"p"/g)].pop();
+    if (!call) fail(`disclosure: no <p> before YY+hPA in ${f}`);
+    const pfx = call[1] ?? '';
+    const open = Math.max(0, at - 400) + call.index + call[0].indexOf('(');
+    const end = matchEnd(s, open);
+    const para =
+      `,${pfx}jsxs("p",{children:["This service runs open-source software licensed under the GNU AGPL v3. ",` +
+      `${sourceLink(pfx)},"."]})`;
+    s = s.slice(0, end) + para + s.slice(end);
+    set(f, s);
+    n++;
+  }
+  if (n !== 2) fail(`disclosure source link: expected 2, patched ${n}`);
+  report.push(`source link on signature disclosure: ${n}`);
+}
+
 // ---- 2. Hashed image assets -------------------------------------------------
 
 const clientAssets = path.join(BUILD, 'client/assets');
@@ -133,6 +185,7 @@ const RULES = [
   [/Timur Ercan/g, NAME, 1],
   [/"\/u\/timur"/g, '"/u/nidzam"', 1],
   [/https:\/\/documen\.so\/mail-footer/g, 'https://nidzam.com', 1],
+  [/support@documenso\.com/g, SUPPORT_EMAIL, 5],
   // "Want to send slick signing links like this one? Check out Documenso." -> empty, in every language
   [/(\\?)"SoyL72\1":\[(?:\\?"(?:[^"\\]|\\.)*?\\?")\]/g, '$1"SoyL72$1":[$1"$1"]', 10],
   // everything else: the product name in user-facing strings
@@ -158,8 +211,22 @@ for (const [re, to, min] of RULES) {
 // keep the old Documenso files under their old names. Every changed asset gets a
 // new name (x.js -> x.nz.js), and so does every asset that refers to a renamed
 // one, repeated until nothing new is found. Pages (HTML) aren't cached, and the
-// server bundle only has its references updated.
+// server bundle only has its references updated. The new name carries a build
+// fingerprint (this script + assets), so a later patch change gives new names
+// again instead of reusing ones Cloudflare already cached.
 
+const fingerprint = (() => {
+  const h = crypto.createHash('sha256');
+  const add = (p) => {
+    for (const e of fs.readdirSync(p, { withFileTypes: true }).sort((a, b) => a.name.localeCompare(b.name))) {
+      const q = path.join(p, e.name);
+      if (e.isDirectory()) add(q);
+      else if (e.name !== 'patch-report.txt') h.update(e.name).update(fs.readFileSync(q));
+    }
+  };
+  add(ASSETS);
+  return h.digest('hex').slice(0, 8);
+})();
 const assetNames = fs.readdirSync(clientAssets);
 const assetText = (n) => src.get(path.join(clientAssets, n)) ?? fs.readFileSync(path.join(clientAssets, n), 'utf8');
 const textAssets = assetNames.filter((n) => /\.(m?js|css)$/.test(n));
@@ -167,7 +234,7 @@ const renamed = new Map();
 const rename = (n) => {
   if (renamed.has(n)) return false;
   const dot = n.lastIndexOf('.');
-  renamed.set(n, `${n.slice(0, dot)}.nz${n.slice(dot)}`);
+  renamed.set(n, `${n.slice(0, dot)}.nz-${fingerprint}${n.slice(dot)}`);
   return true;
 };
 for (const f of changed) if (path.dirname(f) === clientAssets) rename(path.basename(f));
@@ -200,7 +267,7 @@ for (const f of allText) {
   }
 }
 if (renamed.size < 10 || refCount < renamed.size) fail(`rename: ${renamed.size} files, ${refCount} references`);
-report.push(`renamed ${renamed.size} browser assets, ${refCount} references updated`);
+report.push(`renamed ${renamed.size} browser assets (*.nz-${fingerprint}.*), ${refCount} references updated`);
 
 // ---- write + sanity checks ----------------------------------------------------
 
