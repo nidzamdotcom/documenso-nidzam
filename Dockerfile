@@ -2,10 +2,17 @@
 # product name replaced. No recompiling; patch-nidzam.mjs rewrites built files.
 # Build with ./build.sh (it pins the base version and tags the result).
 ARG BASE=documenso/documenso:v2.20.0
+# Patched Node from the official image, on the same Alpine release as the
+# Documenso base (3.23). Bump this when Node ships a security release before
+# Documenso does; drop it once the base already has an equal or newer Node.
+ARG NODE=node:24.22.1-alpine3.23
+FROM ${NODE} AS node
 FROM ${BASE}
 ARG BASE
 
 USER root
+COPY --from=node /usr/local/bin/node /usr/local/bin/node
+RUN node -v
 COPY assets/ /nidzam/
 COPY patch-nidzam.mjs /nidzam/patch-nidzam.mjs
 

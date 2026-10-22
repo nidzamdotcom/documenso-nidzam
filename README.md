@@ -41,6 +41,10 @@ Then use `documenso-nidzam:<version>` in place of `documenso/documenso:<version>
 file. Runtime configuration is unchanged (see Documenso's self-hosting docs). Set
 `NEXT_PRIVATE_SIGNING_REASON` to change the "Signed by …" reason in sealed PDFs.
 
+The image also swaps in the Node binary from the official `node` image named by the `NODE` build
+argument, so a Node security release can be applied without waiting for a new Documenso image. Keep
+its Alpine release the same as the Documenso base's.
+
 ## Licence
 
 The code in this repository (`Dockerfile`, `build.sh`, `patch-nidzam.mjs`) is licensed under the
